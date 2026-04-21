@@ -16,6 +16,15 @@ class ProductBase(BaseModel):
 class ProductCreate(ProductBase):
     pass
 
+class ProductUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = None
+    price: Decimal | None = Field(None, gt=0, decimal_places=2)
+    stock: int | None = Field(None, ge=0)
+    category_id: UUID | None = None
+    is_active: bool | None = None
+    image_url: str | None = None      # ← add this
+
 
 class ProductUpdate(BaseModel):
     """All fields optional for partial updates (PATCH semantics)."""
@@ -30,6 +39,7 @@ class ProductUpdate(BaseModel):
 class ProductResponse(ProductBase):
     id: UUID
     is_active: bool
+    image_url: str | None = None   
     created_by: str
     created_at: datetime
     updated_at: datetime
