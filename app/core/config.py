@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     # ─── CORS ─────────────────────────────────────────────────────────────────
     # Comma-separated list of allowed origins.
     # Example: "http://localhost:3000,https://myapp.com"
-    allowed_origins: str = "http://localhost:3000"
+    allowed_origins: str = "http://localhost:3000",  "https://vendora-customer-ui.onrender.com", "https://vendora-admin-ui.onrender.com"
 
     # ─── Computed Properties ──────────────────────────────────────────────────
 
