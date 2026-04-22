@@ -1,9 +1,5 @@
-"""
-Application Configuration (Fixed Version)
-"""
 from functools import lru_cache
 from typing import List
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,24 +11,24 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ─── Application ───────────────────────────────
+    # ─── App ─────────────────────────────
     app_name: str = "E-Commerce API"
     app_version: str = "1.0.0"
     app_env: str = "development"
     debug: bool = False
 
-    # ─── Supabase ───────────────────────────────
+    # ─── Supabase ────────────────────────
     supabase_url: str
     supabase_anon_key: str
     supabase_service_role_key: str
     supabase_jwt_secret: str
 
-    # ─── Paystack ───────────────────────────────
+    # ─── Paystack ────────────────────────
     paystack_secret_key: str = ""
     paystack_public_key: str = ""
     paystack_webhook_secret: str = ""
 
-    # ─── CORS ───────────────────────────────
+    # ─── CORS (IMPORTANT FIX) ────────────
     allowed_origins: List[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
@@ -41,7 +37,7 @@ class Settings(BaseSettings):
         "https://vendora-admin-ui.onrender.com",
     ]
 
-    # ─── Computed Properties ───────────────────────────────
+    # ─── Helpers ─────────────────────────
     @property
     def cors_origins(self) -> List[str]:
         return self.allowed_origins
