@@ -42,7 +42,7 @@ def list_products(
         default=False,
         description="When true, only products with stock > 0 are returned",
     ),
-    _: CurrentUser = Depends(get_current_user),
+#    _: CurrentUser = Depends(get_current_user),
     service: ProductService = Depends(ProductService),
 ):
     """
@@ -72,7 +72,7 @@ def list_products(
 @router.get("/{product_id}", response_model=ProductResponse)
 def get_product(
     product_id: UUID,
-    _: CurrentUser = Depends(get_current_user),
+#   _: CurrentUser = Depends(get_current_user),
     service: ProductService = Depends(ProductService),
 ):
     """
