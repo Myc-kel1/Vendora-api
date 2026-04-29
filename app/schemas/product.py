@@ -1,13 +1,17 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Annotated
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, condecimal
 
 
 class ProductBase(BaseModel):
     name:        str     = Field(..., min_length=1, max_length=255)
     description: str     = Field(..., min_length=1)
-    price:       Decimal = Field(..., gt=0, decimal_places=2)
+    price: Annotated[
+        Decimal,
+        Field(gt=0, max_digits=10, decimal_places=2)
+    ] | None = None
     stock:       int     = Field(..., ge=0)
     category_id: UUID | None = None
 
@@ -20,7 +24,10 @@ class ProductUpdate(BaseModel):
     """All fields optional — PATCH semantics."""
     name:        str | None     = Field(None, min_length=1, max_length=255)
     description: str | None     = None
-    price:       Decimal | None = Field(None, gt=0, decimal_places=2)
+    price: Annotated[
+        Decimal,
+        Field(None, gt=0, max_digits=10, decimal_places=2)
+    ] | None = None
     stock:       int | None     = Field(None, ge=0)
     category_id: UUID | None    = None
     is_active:   bool | None    = None
