@@ -1,4 +1,4 @@
-"""Product Service."""
+"""Product Service — business logic for catalog operations."""
 from uuid import UUID
 from app.repositories.product_repository import ProductRepository
 from app.schemas.product import ProductCreate, ProductListResponse, ProductResponse, ProductUpdate
@@ -30,7 +30,7 @@ class ProductService:
 
     def update_product(self, product_id: UUID, data: ProductUpdate) -> ProductResponse:
         payload = data.model_dump(exclude_unset=True)
-        if "price" in payload:
+        if "price" in payload and payload["price"] is not None:
             payload["price"] = float(payload["price"])
         if "category_id" in payload and payload["category_id"]:
             payload["category_id"] = str(payload["category_id"])
@@ -44,5 +44,5 @@ class ProductService:
         return ProductResponse(**self.repo.update(product_id, {"stock": new_stock}))
 
     def set_image_url(self, product_id: UUID, image_url: str | None) -> ProductResponse:
-        """Save (or clear) the product image URL after a storage upload."""
+        """Called after upload — saves public URL on the product."""
         return ProductResponse(**self.repo.update(product_id, {"image_url": image_url}))

@@ -2,31 +2,28 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
-
 from pydantic import BaseModel
 
 OrderStatus = Literal["pending", "paid", "failed", "cancelled"]
 
 
 class OrderItemResponse(BaseModel):
-    id: UUID
-    product_id: UUID
+    id:           UUID
+    product_id:   UUID
     product_name: str
-    quantity: int
-    price: Decimal
-    subtotal: Decimal
-
+    quantity:     int
+    price:        Decimal   # price snapshot at order time
+    subtotal:     Decimal
     model_config = {"from_attributes": True}
 
 
 class OrderResponse(BaseModel):
-    id: UUID
-    user_id: str
-    status: OrderStatus
+    id:           UUID
+    user_id:      str
+    status:       OrderStatus
     total_amount: Decimal
-    items: list[OrderItemResponse]
-    created_at: datetime  # datetime, not str — serializes to ISO 8601 automatically
-
+    items:        list[OrderItemResponse]
+    created_at:   datetime
     model_config = {"from_attributes": True}
 
 
@@ -36,5 +33,4 @@ class OrderListResponse(BaseModel):
 
 
 class OrderStatusUpdate(BaseModel):
-    """Used by admin to manually update order status."""
     status: OrderStatus

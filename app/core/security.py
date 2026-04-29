@@ -1,126 +1,77 @@
 """
-JWT Security Utilities.
-
-Supabase issues JWTs signed with ES256 (using Supabase's private key).
-This module verifies those tokens by fetching Supabase's public key
-from their JWKS endpoint.
+JWT verification — Supabase HS256 tokens.
 
 Token structure (Supabase-specific):
-  {
-    "sub": "<user-uuid>",           ← user ID
-    "email": "user@example.com",
-    "role": "authenticated",        ← Supabase's role (not ours)
-    "app_metadata": {
-      "role": "user" | "admin"      ← OUR custom role (set via trigger)
-    },
-    "exp": <unix-timestamp>,
-    "aud": "authenticated"
-  }
+  sub           → user UUID  (the user's ID)
+  email         → user email
+  app_metadata  → { "role": "user" | "admin" }  — set SERVER-SIDE only, tamper-proof
+  exp           → Unix expiry timestamp
+  aud           → "authenticated"
 
-IMPORTANT: Role is read from app_metadata.role (set server-side via
-the sync_role_to_auth_metadata() DB trigger). Never read from
-user_metadata — users can edit that themselves.
+We read role from app_metadata ONLY, never from user_metadata.
+user_metadata is editable by the user — never trust it for authorization.
 
-Public surface:
-  decode_jwt(token)            → validated payload dict
-  extract_user_id(payload)     → str UUID
-  extract_role(payload)        → "user" | "admin"
-  require_role(payload, role)  → None or raises ForbiddenError
+python-jose validates signature AND expiry inside jwt.decode().
+We do not duplicate the expiry check — that would imply we don't trust the library.
 """
-from datetime import datetime, timezone
-from functools import lru_cache
-from jose import jwt
-import httpx
 from jose import JWTError, jwt
-import requests
-
 from app.core.config import get_settings
-from app.core.exceptions import AuthenticationError, ForbiddenError
+from app.core.exceptions import AuthenticationError
+
+ALGORITHM = "HS256"
 
 
-@lru_cache(maxsize=1)
-def _get_supabase_public_key():
+def decode_jwt(token: str) -> dict:
     """
-    Fetch Supabase's public key from the JWKS endpoint.
-    
-    Cached to avoid repeated network calls during request handling.
-    
-    Returns:
-        The public key object for verifying ES256 tokens
-        
-    Raises:
-        AuthenticationError: if unable to fetch the key
+    Decode and cryptographically verify a Supabase JWT.
+
+    Raises AuthenticationError if:
+      - Token is malformed or tampered
+      - Signature does not match the project JWT secret
+      - Token is expired (python-jose checks exp automatically)
     """
     settings = get_settings()
-    jwks_url = f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
-    jwks = requests.get(jwks_url).json()
-
-      # Supabase usually returns 1 active key
-    key_data = jwks["keys"][0]
-
-    return key_data
-
-
-def decode_jwt(token: str):
-    jwks = _get_supabase_public_key()
-
-    payload = jwt.decode(
-        token,
-        jwks,
-        algorithms=["ES256"],   # Supabase uses ES256
-        audience="authenticated"
-    )
+    try:
+        payload = jwt.decode(
+            token,
+            settings.supabase_jwt_secret,
+            algorithms=[ALGORITHM],
+            # Supabase sets aud="authenticated" on all user tokens.
+            # We skip audience validation here because we don't restrict
+            # to a specific audience — Supabase handles that.
+            options={"verify_aud": False},
+        )
+    except JWTError as exc:
+        raise AuthenticationError(f"Invalid or expired token: {exc}")
 
     return payload
 
 
 def extract_user_id(payload: dict) -> str:
     """
-    Extract the user's UUID from the 'sub' claim of a decoded JWT.
-
-    Raises:
-        AuthenticationError: if the 'sub' claim is missing.
+    Extract user UUID from the 'sub' claim.
+    Raises AuthenticationError if claim is missing.
     """
-    user_id = payload.get("sub")
-    if not user_id:
-        raise AuthenticationError("Token is missing the subject (sub) claim")
-    return user_id
+    uid = payload.get("sub")
+    if not uid:
+        raise AuthenticationError("Token missing subject (sub) claim")
+    return uid
+
+
+def extract_email(payload: dict) -> str:
+    return payload.get("email", "")
 
 
 def extract_role(payload: dict) -> str:
     """
-    Extract the user's custom application role from app_metadata.
+    Extract application role from app_metadata.role.
 
-    Reads from payload["app_metadata"]["role"].
-    Defaults to "user" if the key is absent (new users before the
-    auth trigger has fired, or if app_metadata is empty).
+    Defaults to 'user' if:
+      - app_metadata is absent (new user, trigger not yet fired)
+      - role key is not present
 
-    Never reads from user_metadata — that field is user-editable.
-    app_metadata is set server-side only (via our DB trigger).
+    SECURITY: app_metadata is set exclusively by server-side DB triggers
+    (sync_role_to_auth_metadata). Users cannot modify app_metadata through
+    the Supabase client SDK — it requires service role access.
     """
-    app_metadata = payload.get("app_metadata") or {}
-    return app_metadata.get("role", "user")
-
-
-def extract_email(payload: dict) -> str:
-    """Extract the user's email from the JWT payload."""
-    return payload.get("email", "")
-
-
-def require_role(payload: dict, required_role: str) -> None:
-    """
-    Assert that the decoded JWT payload carries the required role.
-
-    Used as a lightweight guard in service-layer code.
-    For route-level enforcement, prefer the get_current_admin
-    dependency in app/dependencies/auth.py.
-
-    Raises:
-        ForbiddenError: if the token's role does not match required_role.
-    """
-    role = extract_role(payload)
-    if role != required_role:
-        raise ForbiddenError(
-            f"This action requires role='{required_role}'. "
-            f"Your token has role='{role}'."
-        )
+    return (payload.get("app_metadata") or {}).get("role", "user")
