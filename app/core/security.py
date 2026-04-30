@@ -1,5 +1,5 @@
 """
-JWT verification — Supabase HS256 tokens.
+JWT verification — Supabase RS256 tokens (modern standard).
 
 Token structure (Supabase-specific):
   sub           → user UUID  (the user's ID)
@@ -7,50 +7,83 @@ Token structure (Supabase-specific):
   app_metadata  → { "role": "user" | "admin" }  — set SERVER-SIDE only, tamper-proof
   exp           → Unix expiry timestamp
   aud           → "authenticated"
+  iss           → https://<project>.supabase.co/auth/v1
+
+We verify tokens using Supabase JWKS (public keys).
+This is required for RS256 (asymmetric signing).
 
 We read role from app_metadata ONLY, never from user_metadata.
 user_metadata is editable by the user — never trust it for authorization.
-
-python-jose validates signature AND expiry inside jwt.decode().
-We do not duplicate the expiry check — that would imply we don't trust the library.
 """
+
 from jose import JWTError, jwt
+import httpx
+
 from app.core.config import get_settings
 from app.core.exceptions import AuthenticationError
 
-ALGORITHM = "HS256"
+# Supabase uses RS256 for modern projects
+ALGORITHMS = ["RS256"]
+
+# Simple in-memory cache for JWKS
+_JWKS_CACHE: dict | None = None
 
 
-def decode_jwt(token: str) -> dict:
+async def _get_jwks() -> dict:
     """
-    Decode and cryptographically verify a Supabase JWT.
+    Fetch and cache Supabase JWKS (public keys).
+    """
+    global _JWKS_CACHE
+
+    if _JWKS_CACHE:
+        return _JWKS_CACHE
+
+    settings = get_settings()
+    url = f"{settings.supabase_url}/auth/v1/keys"
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            _JWKS_CACHE = response.json()
+            return _JWKS_CACHE
+
+    except Exception as exc:
+        raise AuthenticationError(f"Failed to fetch JWKS: {exc}")
+
+
+async def decode_jwt(token: str) -> dict:
+    """
+    Decode and cryptographically verify a Supabase JWT (RS256).
 
     Raises AuthenticationError if:
       - Token is malformed or tampered
-      - Signature does not match the project JWT secret
-      - Token is expired (python-jose checks exp automatically)
+      - Signature is invalid
+      - Token is expired (handled by python-jose)
+      - Issuer or audience is invalid
     """
     settings = get_settings()
+
     try:
+        jwks = await _get_jwks()
+
         payload = jwt.decode(
             token,
-            settings.supabase_jwt_secret,
-            algorithms=[ALGORITHM],
-            # Supabase sets aud="authenticated" on all user tokens.
-            # We skip audience validation here because we don't restrict
-            # to a specific audience — Supabase handles that.
-            options={"verify_aud": False},
+            jwks,
+            algorithms=ALGORITHMS,
+            audience="authenticated",
+            issuer=f"{settings.supabase_url}/auth/v1",
         )
+
+        return payload
+
     except JWTError as exc:
         raise AuthenticationError(f"Invalid or expired token: {exc}")
-
-    return payload
 
 
 def extract_user_id(payload: dict) -> str:
     """
     Extract user UUID from the 'sub' claim.
-    Raises AuthenticationError if claim is missing.
     """
     uid = payload.get("sub")
     if not uid:
@@ -59,6 +92,9 @@ def extract_user_id(payload: dict) -> str:
 
 
 def extract_email(payload: dict) -> str:
+    """
+    Extract user email.
+    """
     return payload.get("email", "")
 
 
@@ -67,11 +103,11 @@ def extract_role(payload: dict) -> str:
     Extract application role from app_metadata.role.
 
     Defaults to 'user' if:
-      - app_metadata is absent (new user, trigger not yet fired)
+      - app_metadata is absent
       - role key is not present
 
-    SECURITY: app_metadata is set exclusively by server-side DB triggers
-    (sync_role_to_auth_metadata). Users cannot modify app_metadata through
-    the Supabase client SDK — it requires service role access.
+    SECURITY:
+    app_metadata is server-controlled (Supabase service role / DB triggers).
+    Users cannot modify it via client SDK.
     """
     return (payload.get("app_metadata") or {}).get("role", "user")
