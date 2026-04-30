@@ -16,8 +16,8 @@ _jwks_cache = None
 
 async def get_jwks():
     """
-    Fetch Supabase JWKS (public keys).
-    This endpoint is public — no auth required.
+    Fetch Supabase JWKS (cached).
+    Requires anon key header (Supabase now enforces this).
     """
     global _jwks_cache
 
@@ -28,8 +28,13 @@ async def get_jwks():
 
     url = f"{settings.supabase_url}/auth/v1/keys"
 
+    headers = {
+        "apikey": settings.supabase_anon_key,   # ✅ REQUIRED
+        "Authorization": f"Bearer {settings.supabase_anon_key}"
+    }
+
     async with httpx.AsyncClient(timeout=5.0) as client:
-        res = await client.get(url)
+        res = await client.get(url, headers=headers)
 
         if res.status_code != 200:
             raise AuthenticationError(
