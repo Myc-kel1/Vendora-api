@@ -55,6 +55,33 @@ async def get_current_user(
     )
 
 
+async def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> CurrentUser | None:
+    """
+    Optionally validate the Bearer JWT and return the authenticated user.
+
+    Returns None if no Authorization header is provided.
+    Raises AuthenticationError (401) if a token is provided but invalid or expired.
+
+    Use on public endpoints that benefit from knowing who the user is (e.g., for analytics)
+    but should not require authentication.
+
+    Best practice: public, cacheable endpoints should accept optional auth to track usage
+    without blocking unauthenticated users.
+    """
+    if not credentials:
+        return None
+
+    payload = decode_jwt(credentials.credentials)
+
+    return CurrentUser(
+        id=extract_user_id(payload),
+        email=extract_email(payload),
+        role=extract_role(payload),
+    )
+
+
 async def get_current_admin(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> CurrentUser:
