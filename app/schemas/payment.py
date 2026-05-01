@@ -12,6 +12,17 @@ class PaymentInitResponse(BaseModel):
     reference:         str   # stored on order for webhook lookup
 
 
+class PaymentVerifyRequest(BaseModel):
+    reference: str = Field(description="Paystack transaction reference to verify")
+
+
+class PaymentVerifyResponse(BaseModel):
+    status: str   # "success" | "pending" | "failed"
+    order_id: str
+    amount: float
+    paid_at: str | None = None
+
+
 class PaymentWebhookPayload(BaseModel):
     """
     Paystack webhook payload — documented for reference.

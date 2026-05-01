@@ -19,7 +19,7 @@ from app.core.config import get_settings
 from app.core.exceptions import NotFoundError, PaymentError
 from app.core.logging import get_logger
 from app.repositories.order_repository import OrderRepository
-from app.schemas.payment import PaymentInitRequest, PaymentInitResponse
+from app.schemas.payment import PaymentInitRequest, PaymentInitResponse, PaymentVerifyResponse
 
 logger = get_logger(__name__)
 PAYSTACK_BASE = "https://api.paystack.co"
@@ -80,6 +80,48 @@ class PaymentService:
         if event_type == "charge.failed":
             return self._handle_charge_failed(reference)
         return {"status": "ignored", "event": event_type}
+
+    def verify_payment(self, reference: str, user_id: str) -> PaymentVerifyResponse:
+        """
+        Verify a payment status for a user's order.
+
+        Best practice: User can verify their payment status without relying solely on webhook.
+        Still calls Paystack API for fresh data and validates user ownership of order.
+
+        Raises:
+          ForbiddenError — user does not own this order
+          NotFoundError — order not found
+          PaymentError — Paystack API error
+        """
+        from app.core.exceptions import ForbiddenError
+        
+        order = self.order_repo.get_order_by_payment_reference(reference)
+        if not order:
+            raise NotFoundError(f"No order found for reference: {reference}")
+        
+        if order["user_id"] != user_id:
+            raise ForbiddenError("You do not have access to this order")
+
+        # Re-verify with Paystack API for authoritative status
+        res = self._call_paystack("GET", f"/transaction/verify/{reference}")
+        paystack_status = res.get("data", {}).get("status")
+        
+        # Map Paystack statuses to our order status
+        if paystack_status == "success" and order["status"] != "paid":
+            self.order_repo.update_order_status(order["id"], "paid")
+            order["status"] = "paid"
+            logger.info("payment_verified_and_updated", order_id=order["id"])
+        elif paystack_status == "failed" and order["status"] not in ("failed", "cancelled"):
+            self.order_repo.update_order_status(order["id"], "failed")
+            order["status"] = "failed"
+            logger.info("payment_failed_verified", order_id=order["id"])
+
+        return PaymentVerifyResponse(
+            status=order["status"],
+            order_id=order["id"],
+            amount=float(order["total_amount"]),
+            paid_at=order.get("paid_at"),
+        )
 
     def _handle_charge_success(self, reference: str | None) -> dict:
         if not reference:
