@@ -46,7 +46,7 @@ def initialize_payment(
     return service.initialize_payment(payload, user_id=current_user.id, user_email=current_user.email)
 
 
-@router.post("/verify/{reference}", response_model=PaymentVerifyResponse)
+@router.get("/verify/{reference}", response_model=PaymentVerifyResponse)
 def verify_payment(
     reference: str,
     current_user: CurrentUser = Depends(get_current_user),
