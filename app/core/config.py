@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     paystack_webhook_secret: str = ""
 
     # CORS — comma-separated list of allowed frontend origins
-    allowed_origins: str = "http://localhost:5173"
+    allowed_origins: str = "http://localhost:5173,http://localhost:3000,https://vendora-customer-ui.onrender.com,https://vendora-admin-ui.onrender.com"
 
     @property
     def cors_origins(self) -> list[str]:
