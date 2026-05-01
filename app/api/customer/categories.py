@@ -1,7 +1,6 @@
 """Customer — Categories (public, read-only)."""
 from uuid import UUID
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Response
 from app.dependencies.auth import get_current_user_optional
 from app.schemas.product import CategoryResponse
 from app.schemas.user import CurrentUser
@@ -12,43 +11,29 @@ router = APIRouter(prefix="/categories", tags=["Customer — Categories"])
 
 @router.get("", response_model=list[CategoryResponse])
 def list_categories(
+    response: Response,  # 👈 inject response
     current_user: CurrentUser | None = Depends(get_current_user_optional),
     service: CategoryService = Depends(CategoryService),
 ):
-    """
-    List all categories (public endpoint).
-    No authentication required.
-
-    Cache-Control: Set to allow browsers and CDNs to cache this public data.
-    """
     categories = service.list_categories()
-    # Return JSONResponse to add caching headers for public data
-    return JSONResponse(
-        content=[cat.model_dump() if hasattr(cat, 'model_dump') else cat for cat in categories],
-        headers={
-            "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
-            "X-User-Id": current_user.id if current_user else "anonymous",
-        }
-    )
+
+    # ✅ Set headers safely
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    response.headers["X-User-Id"] = str(current_user.id) if current_user else "anonymous"
+
+    return categories  # ✅ CRITICAL FIX
 
 
 @router.get("/{category_id}", response_model=CategoryResponse)
 def get_category(
     category_id: UUID,
+    response: Response,  # 👈 inject response
     current_user: CurrentUser | None = Depends(get_current_user_optional),
     service: CategoryService = Depends(CategoryService),
 ):
-    """
-    Get a single category by ID (public endpoint).
-    No authentication required.
-
-    Cache-Control: Set to allow browsers and CDNs to cache this public data.
-    """
     category = service.get_category(category_id)
-    return JSONResponse(
-        content=category.model_dump() if hasattr(category, 'model_dump') else category,
-        headers={
-            "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
-            "X-User-Id": current_user.id if current_user else "anonymous",
-        }
-    )
+
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    response.headers["X-User-Id"] = str(current_user.id) if current_user else "anonymous"
+
+    return category  # ✅ CRITICAL FIX
