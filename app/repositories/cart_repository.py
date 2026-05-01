@@ -14,38 +14,41 @@ class CartRepository:
     # CART
     # -------------------------
     def get_or_create_cart(self, user_id: str) -> dict:
-        try:
-            res = (
-                self.db.table(CART_TABLE)
-                .select("*")
-                .eq("user_id", user_id)
-                .limit(1)
-                .execute()
-            )
-        except Exception:
-            res = None
+        res = (
+            self.db.table(CART_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
 
-        # Safe extraction
-        data = getattr(res, "data", None) if res else None
+        data = getattr(res, "data", None)
 
         if data:
             return data[0]
 
-        # Create cart if not exists
+        # create cart (NO select chaining here)
         create_res = (
             self.db.table(CART_TABLE)
             .insert({"user_id": user_id})
-            .select("*")
             .execute()
         )
 
-        create_data = getattr(create_res, "data", None) if create_res else None
+        created = getattr(create_res, "data", None)
 
-        if not create_data:
-            raise RuntimeError("Failed to create cart")
+        if not created:
+            raise RuntimeError("Cart creation failed")
 
-        return create_data[0]
+        # 🔥 re-fetch safely (BEST PRACTICE FIX)
+        fresh = (
+            self.db.table(CART_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
 
+        return fresh.data[0]
     # -------------------------
     # CART + ITEMS
     # -------------------------
@@ -107,37 +110,41 @@ class CartRepository:
     # MUTATIONS
     # -------------------------
     def add_item(self, cart_id: str, product_id: str, quantity: int) -> dict:
-        res = (
-            self.db.table(ITEM_TABLE)
-            .insert({
+        existing_item = self.get_item(cart_id, product_id)
+        if existing_item:
+            new_quantity = existing_item["quantity"] + quantity
+            return self.update_item_quantity(existing_item["id"], new_quantity)
+        else:
+            self.db.table(ITEM_TABLE).insert({
                 "cart_id": cart_id,
                 "product_id": product_id,
                 "quantity": quantity
-            })
-            .select("*")
-            .execute()
-        )
-
-        data = getattr(res, "data", None)
-        if not data:
-            raise RuntimeError("Failed to add item to cart")
-
-        return data[0]
+            }).execute()
+            # safest approach: re-query
+            res = (
+                self.db.table(ITEM_TABLE)
+                .select("*")
+                .eq("cart_id", cart_id)
+                .eq("product_id", product_id)
+                .limit(1)
+                .execute()
+            )
+            return res.data[0]
 
     def update_item_quantity(self, item_id: str, quantity: int) -> dict:
+        self.db.table(ITEM_TABLE).update({
+            "quantity": quantity
+        }).eq("id", item_id).execute()
+
         res = (
             self.db.table(ITEM_TABLE)
-            .update({"quantity": quantity})
-            .eq("id", item_id)
             .select("*")
+            .eq("id", item_id)
+            .limit(1)
             .execute()
         )
 
-        data = getattr(res, "data", None)
-        if not data:
-            raise RuntimeError("Failed to update item quantity")
-
-        return data[0]
+        return res.data[0]
 
     def remove_item(self, item_id: str, cart_id: str) -> None:
         self.db.table(ITEM_TABLE).delete().eq("id", item_id).eq("cart_id", cart_id).execute()
