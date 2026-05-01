@@ -1,109 +1,55 @@
-from jose import JWTError, jwt
-import httpx
-from functools import lru_cache
+"""
+JWT validation via Supabase (ES256 compatible).
 
+We do NOT manually verify JWT signatures.
+Supabase handles validation via /auth/v1/user.
+
+This works for:
+- ES256 (your current setup)
+- RS256 (future-proof)
+- Any Supabase changes
+
+We only trust:
+- app_metadata.role (server-controlled)
+"""
+
+import httpx
 from app.core.config import get_settings
 from app.core.exceptions import AuthenticationError
 
-ALGORITHMS = ["RS256"]
 
-
-# -----------------------------
-# JWKS CACHE
-# -----------------------------
-_jwks_cache = None
-
-
-async def get_jwks():
-    """
-    Fetch Supabase JWKS (cached).
-    Requires anon key header (Supabase now enforces this).
-    """
-    global _jwks_cache
-
-    if _jwks_cache:
-        return _jwks_cache
-
-    settings = get_settings()
-
-    url = f"{settings.supabase_url}/auth/v1/keys"
-
-    headers = {
-        "apikey": settings.supabase_anon_key,   # ✅ REQUIRED
-        "Authorization": f"Bearer {settings.supabase_anon_key}"
-    }
-
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        res = await client.get(url, headers=headers)
-
-        if res.status_code != 200:
-            raise AuthenticationError(
-                f"Failed to fetch JWKS: {res.status_code} {res.text}"
-            )
-
-        _jwks_cache = res.json()
-        return _jwks_cache
-
-
-# -----------------------------
-# GET SIGNING KEY
-# -----------------------------
-def get_public_key(jwks: dict, kid: str) -> str:
-    """
-    Extract correct RSA public key from JWKS using kid.
-    """
-    for key in jwks.get("keys", []):
-        if key.get("kid") == kid:
-            return key
-
-    raise AuthenticationError("Invalid token key ID (kid not found)")
-
-
-# -----------------------------
-# DECODE JWT
-# -----------------------------
 async def decode_jwt(token: str) -> dict:
     """
-    Verify Supabase JWT using RS256 + JWKS.
+    Validate Supabase JWT by calling Supabase Auth API.
+
+    Raises AuthenticationError if token is invalid or expired.
     """
     settings = get_settings()
 
+    url = f"{settings.supabase_url}/auth/v1/user"
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "apikey": settings.supabase_anon_key,
+    }
+
     try:
-        # 1. Read token header (NO verification yet)
-        unverified_header = jwt.get_unverified_header(token)
-        kid = unverified_header.get("kid")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get(url, headers=headers)
 
-        if not kid:
-            raise AuthenticationError("Token missing kid header")
+            if res.status_code != 200:
+                raise AuthenticationError("Invalid or expired token")
 
-        # 2. Fetch JWKS
-        jwks = await get_jwks()
+            return res.json()
 
-        # 3. Get correct key
-        public_key = get_public_key(jwks, kid)
-
-        # 4. Verify token
-        payload = jwt.decode(
-            token,
-            public_key,
-            algorithms=ALGORITHMS,
-            audience="authenticated",
-            issuer=f"{settings.supabase_url}/auth/v1",
-        )
-
-        return payload
-
-    except JWTError as exc:
-        raise AuthenticationError(f"Invalid or expired token: {exc}")
+    except Exception as exc:
+        raise AuthenticationError(f"Auth validation failed: {exc}")
 
 
-# -----------------------------
-# EXTRACTORS (safe)
-# -----------------------------
 def extract_user_id(payload: dict) -> str:
-    uid = payload.get("sub")
+    uid = payload.get("id")  # ⚠️ Supabase returns "id" not "sub" here
     if not uid:
-        raise AuthenticationError("Token missing sub")
+        raise AuthenticationError("User ID missing from token")
     return uid
 
 

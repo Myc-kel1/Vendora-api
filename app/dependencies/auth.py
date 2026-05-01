@@ -22,9 +22,6 @@ bearer_scheme = HTTPBearer(auto_error=False)
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> CurrentUser:
-    """
-    Validate the Bearer JWT and return the authenticated user.
-    """
 
     if not credentials:
         raise AuthenticationError(
@@ -32,12 +29,8 @@ async def get_current_user(
             "Send: Authorization: Bearer <your_supabase_access_token>"
         )
 
-    # ✅ FIX: decode_jwt is async → MUST await
+    # ✅ FIX: await here
     payload = await decode_jwt(credentials.credentials)
-
-    # Extra safety: ensure payload is dict
-    if not isinstance(payload, dict):
-        raise AuthenticationError("Invalid token payload")
 
     return CurrentUser(
         id=extract_user_id(payload),
