@@ -40,11 +40,15 @@ class PaymentService:
             raise PaymentError(f"Order is not payable (status: {order['status']})")
 
         amount_kobo = int(float(order["total_amount"]) * 100)
-        res = self._call_paystack("POST", "/transaction/initialize", {
+        request_data = {
             "email":    user_email,
             "amount":   amount_kobo,
             "metadata": {"order_id": str(payload.order_id)},
-        })
+        }
+        if self.settings.paystack_callback_url:
+            request_data["callback_url"] = self.settings.paystack_callback_url
+
+        res = self._call_paystack("POST", "/transaction/initialize", request_data)
 
         reference = res["data"]["reference"]
         self.order_repo.set_payment_reference(str(payload.order_id), reference)
@@ -53,6 +57,36 @@ class PaymentService:
             authorization_url=res["data"]["authorization_url"],
             access_code=res["data"]["access_code"],
             reference=reference,
+        )
+
+    def complete_payment(self, reference: str) -> PaymentVerifyResponse:
+        """
+        Verify and finalize payment status using a Paystack reference.
+
+        This is intended for callback-style flows where the user returns from
+        Paystack and the backend can update the order status automatically.
+        """
+        order = self.order_repo.get_order_by_payment_reference(reference)
+        if not order:
+            raise NotFoundError(f"No order found for reference: {reference}")
+
+        res = self._call_paystack("GET", f"/transaction/verify/{reference}")
+        paystack_status = res.get("data", {}).get("status")
+
+        if paystack_status == "success" and order["status"] != "paid":
+            self.order_repo.update_order_status(order["id"], "paid")
+            order["status"] = "paid"
+            logger.info("payment_verified_and_updated", order_id=order["id"])
+        elif paystack_status == "failed" and order["status"] not in ("failed", "cancelled"):
+            self.order_repo.update_order_status(order["id"], "failed")
+            order["status"] = "failed"
+            logger.info("payment_failed_verified", order_id=order["id"])
+
+        return PaymentVerifyResponse(
+            status=order["status"],
+            order_id=order["id"],
+            amount=float(order["total_amount"]),
+            paid_at=order.get("paid_at"),
         )
 
     def handle_webhook(self, raw_body: bytes, signature: str) -> dict:

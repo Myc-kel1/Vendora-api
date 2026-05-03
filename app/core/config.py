@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     paystack_secret_key:    str = ""
     paystack_public_key:    str = ""
     paystack_webhook_secret: str = ""
+    paystack_callback_url:  str = ""
 
     # CORS — comma-separated list of allowed frontend origins
     allowed_origins: str = "http://localhost:5173,http://localhost:3000,https://vendora-customer-ui.onrender.com,https://vendora-admin-ui.onrender.com"
